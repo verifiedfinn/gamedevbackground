@@ -12,7 +12,7 @@ void main() {
   gl_Position = positionVec4;                        // draw
 }`;
 
-// ---------- Fragment shader (black bg + clean lines + bluer Wii + arcade accent) ----------
+// ---------- Fragment shader (black bg + clean lines + bluer Wii + arcade accent + edge-ease) ----------
 const fragShader = `#ifdef GL_ES
 precision highp float;
 #endif
@@ -24,55 +24,48 @@ uniform float uTheme;   // 0=PS4, 1=Wii (bluer), 2=Xbox, 3=Steam, 4=Arcade
 uniform float uSat;     // 0.7..1.3 typical
 uniform float uHue;     // small phase nudge (-0.05..0.05)
 
-// ARCADE ACCENT (new)
+// ARCADE ACCENT
 uniform float uAccent;  // 0.0 = off, 0.15 subtle, 0.30 stronger
 
 varying vec2 vTexCoord;
 
-// ---------------- Palette: themeable console colors (IQ cosine style) ----------------
+// ---------------- Palette ----------------
 vec3 palette(float t){
-    // PS4: deep navy + electric blue
+    // PS4
     vec3 a0 = vec3(0.02, 0.04, 0.08), b0 = vec3(0.06, 0.18, 0.60), d0 = vec3(0.18, 0.32, 0.46);
-    // Wii (BLUER): airy light-blue, reduced green
-    vec3 a1 = vec3(0.00, 0.00, 0.00);
-    vec3 b1 = vec3(0.06, 0.18, 1.00);   // ↓G, ↑B  (less green, more light blue)
-    vec3 d1 = vec3(0.12, 0.32, 0.54);   // phase nudged toward blue
-    // Xbox: teal-leaning blue/green
+    // Wii (bluer)
+    vec3 a1 = vec3(0.00, 0.00, 0.00), b1 = vec3(0.06, 0.18, 1.00), d1 = vec3(0.12, 0.32, 0.54);
+    // Xbox
     vec3 a2 = vec3(0.00, 0.02, 0.02), b2 = vec3(0.05, 0.70, 0.45), d2 = vec3(0.18, 0.35, 0.30);
-    // Steam/PC: desaturated blue-gray
+    // Steam/PC
     vec3 a3 = vec3(0.02, 0.03, 0.06), b3 = vec3(0.10, 0.18, 0.30), d3 = vec3(0.20, 0.32, 0.42);
-    // Arcade (tasteful): blue with a hint of violet
+    // Arcade (blue→violet)
     vec3 a4 = vec3(0.02, 0.00, 0.06), b4 = vec3(0.35, 0.10, 0.70), d4 = vec3(0.18, 0.38, 0.60);
 
-    vec3 a = a0, b = b0, d = d0; // default PS4
+    vec3 a=a0, b=b0, d=d0;
     if(uTheme > 0.5 && uTheme < 1.5){ a=a1; b=b1; d=d1; }
     else if(uTheme >= 1.5 && uTheme < 2.5){ a=a2; b=b2; d=d2; }
     else if(uTheme >= 2.5 && uTheme < 3.5){ a=a3; b=b3; d=d3; }
     else if(uTheme >= 3.5){ a=a4; b=b4; d=d4; }
 
-    // tiny hue nudge (phase shift)
     d += vec3(uHue);
-
-    // cosine palette
     vec3 c = vec3(0.50, 0.72, 1.00);
     vec3 col = a + b * cos(6.28318*(c*t + d));
 
-    // saturation control toward luminance
+    // saturation toward luminance
     float L = dot(col, vec3(0.2126, 0.7152, 0.0722));
     col = mix(vec3(L), col, clamp(uSat, 0.0, 2.0));
 
-    // ---- subtle arcade magenta accent in bright parts only (NEW) ----
-    // breathe slowly to feel alive, not Tron
+    // subtle magenta accent only in highlights
     float breath = 0.85 + 0.15 * sin(t * 0.25);
-    float L2 = dot(col, vec3(0.2126, 0.7152, 0.0722));
-    float hi = smoothstep(0.72, 0.98, L2); // only highlights
-    vec3 ARCADE = vec3(0.95, 0.18, 0.55);  // magenta/purple accent
+    float hi = smoothstep(0.72, 0.98, L);
+    vec3 ARCADE = vec3(0.95, 0.18, 0.55);
     col = mix(col, ARCADE, hi * clamp(uAccent, 0.0, 1.0) * breath);
 
     return col;
 }
 
-// ---------------- (Original helpers kept for completeness) ----------------
+// (helpers retained)
 float ndot(vec2 a, vec2 b ){ return a.x*b.x - a.y*b.y; }
 float sdRhombus( in vec2 p, in vec2 b ){
   p = abs(p);
@@ -92,36 +85,36 @@ float sdCircle( vec2 p, float r ){ return length(p) - r; }
 
 // ---------------- Main ----------------
 void main() {
-  vec2 uv = vTexCoord * 2.0 - 1.0;                     // [-1,1]
-  const float scale = 1.0;
-  uv.x *= scale * iResolution.x / iResolution.y;       // aspect
-  uv.y *= scale;
+  vec2 uv = vTexCoord * 2.0 - 1.0;   // [-1,1]
+  uv.x *= iResolution.x / iResolution.y;
 
   vec2 uv0 = uv;
-  vec3 finalColor = vec3(0.0);                         // stays black unless lit
+  vec3 finalColor = vec3(0.0);
 
-  // slower motion for elegance
+  // base time
   float t = iTime * 0.22;
 
+  // === Edge-ease phase: slow motion near the perimeter to avoid "speed-up" look ===
+  float r = length(uv0);
+  // starts easing around ~0.55 radius and reaches ~65% speed by the edges
+  float edgeEase = mix(1.0, 0.65, smoothstep(0.55, 1.25, r));
+  float phase = t * edgeEase;
+
+  vec2 w = uv;
   for (float i = 0.0; i < 4.0; i++) {
-    uv = fract(uv * 1.5) - 0.5;
-    float d = length(uv) * exp(-length(uv0));
+    w = fract(w * 1.5) - 0.5;
+    float d = length(w) * exp(-length(uv0));
 
-    // THEMED colors (bluer Wii + subtle arcade accent)
-    vec3 col = palette(length(uv0) + i*0.40 + t*0.35);
+    vec3 col = palette(length(uv0) + i*0.40 + phase*0.35);
 
-    // same modulation as the original
-    d = sin(d*8.0 + t) / 8.0;
+    d = sin(d*8.0 + phase) / 8.0;   // <<< use eased phase
     d = abs(d) / 0.40;
 
-    // CLEAN, SHARP LINES: original tan look, but safe (no NaNs)
     float td = tan(d);
     float inten = pow(0.01 / max(abs(td), 1e-3), 1.20);
+    inten = max(inten - 0.015, 0.0);
 
-    // remove haze so the background remains truly black
-    inten = max(inten - 0.015, 0.0); // tweak 0.010–0.025 for crispness
-
-    finalColor += col * inten; // additive only -> bg stays black
+    finalColor += col * inten;      // background stays black where inten==0
   }
 
   gl_FragColor = vec4(clamp(finalColor, 0.0, 1.0), 1.0);
@@ -141,17 +134,14 @@ function setup() {
 function draw() {
   shader(theShader);
 
-  // Core uniforms
   theShader.setUniform("iResolution", [width, height]);
   theShader.setUniform("iTime", millis() / 1000.0);
 
-  // THEME CONTROLS — Wii bluer base
-  theShader.setUniform("uTheme", 1.0);  // 0=PS4, 1=Wii, 2=Xbox, 3=Steam, 4=Arcade
+  // Wii bluer base + subtle arcade accent
+  theShader.setUniform("uTheme", 1.0);
   theShader.setUniform("uSat",   1.10);
   theShader.setUniform("uHue",  -0.03);
-
-  // NEW: subtle red/purple arcade accent
-  theShader.setUniform("uAccent", 0.18); // try 0.10..0.25
+  theShader.setUniform("uAccent", 0.18);
 
   rect(-width/2, -height/2, width, height);
 }
@@ -159,4 +149,5 @@ function draw() {
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
 }
+
 
