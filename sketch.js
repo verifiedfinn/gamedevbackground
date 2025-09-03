@@ -12,7 +12,7 @@ void main() {
   gl_Position = positionVec4;
 }`;
 
-// ---------- Fragment shader (BLACK bg + same look + POP knobs) ----------
+// ---------- Fragment shader (BLACK bg + same look + POP knobs + FADE-IN) ----------
 const fragShader = `#ifdef GL_ES
 precision highp float;
 #endif
@@ -33,9 +33,13 @@ uniform float uTile;    // 1.2..2.0
 uniform float uThin;    // 0.7..1.2  ( <1 = thicker )
 uniform float uBias;    // 0.008..0.020 haze cut (lower = more fill)
 
-// POP (new)
+// POP
 uniform float uGain;    // 1.0..1.6  brightness boost before clamp
 uniform float uGamma;   // 0.85..0.95 midtone pop ( <1 brightens )
+
+// FADE-IN (new)
+uniform float uHoldSec; // stay fully black this long (e.g. 0.12)
+uniform float uFadeSec; // fade duration in seconds (e.g. 0.8)
 
 varying vec2 vTexCoord;
 
@@ -103,6 +107,10 @@ void main() {
   // POP: simple gain + gamma (keeps black at 0, boosts mid/highs)
   finalColor = pow(max(finalColor * uGain, 0.0), vec3(uGamma));
 
+  // FADE-IN from hard black after a brief hold
+  float fade = smoothstep(0.0, max(uFadeSec, 0.001), max(iTime - uHoldSec, 0.0));
+  finalColor *= fade;
+
   gl_FragColor = vec4(clamp(finalColor, 0.0, 1.0), 1.0);
 }
 `;
@@ -111,13 +119,22 @@ void main() {
 let theShader;
 
 function setup() {
-  createCanvas(windowWidth, windowHeight, WEBGL);
-  pixelDensity(1); // keep exactly like your site for the same look
+  // Make the canvas opaque so the page never bleeds through on first tick
+  setAttributes({ alpha: false });
+
+  const c = createCanvas(windowWidth, windowHeight, WEBGL);
+  pixelDensity(1); // keep your exact look
   noStroke();
   theShader = createShader(vertShader, fragShader);
+
+  // Keep the canvas itself black even before draw() runs
+  c.style('background-color', '#000');
 }
 
 function draw() {
+  // Hard black for the first couple frames while everything warms up
+  if (frameCount <= 2) { background(0); return; }
+
   shader(theShader);
 
   theShader.setUniform("iResolution", [width, height]);
@@ -125,19 +142,23 @@ function draw() {
 
   // --- Wii-bluer + arcade feel (hotter) ---
   theShader.setUniform("uTheme",   1.0);
-  theShader.setUniform("uSat",     1.26); // bump saturation
+  theShader.setUniform("uSat",     1.26);
   theShader.setUniform("uHue",    -0.02);
   theShader.setUniform("uAccent",  0.22);
 
-  // --- Fill / coverage (fuller frame) ---
-  theShader.setUniform("uZoom", 0.82);   // 0.78–0.88
-  theShader.setUniform("uTile", 1.72);   // 1.60–1.85
-  theShader.setUniform("uThin", 0.84);   // 0.80 thicker, 1.00 thinner
-  theShader.setUniform("uBias", 0.010);  // lower = more glow but still black bg
+  // --- Fill / coverage ---
+  theShader.setUniform("uZoom", 0.82);
+  theShader.setUniform("uTile", 1.72);
+  theShader.setUniform("uThin", 0.84);
+  theShader.setUniform("uBias", 0.010);
 
-  // --- POP (the missing heat) ---
-  theShader.setUniform("uGain",  1.35);  // 1.20–1.50
-  theShader.setUniform("uGamma", 0.90);  // 0.85–0.95 brightens mids
+  // --- POP ---
+  theShader.setUniform("uGain",  1.35);
+  theShader.setUniform("uGamma", 0.90);
+
+  // --- FADE CONTROL ---
+  theShader.setUniform("uHoldSec", 0.12); // stay fully black for ~120ms
+  theShader.setUniform("uFadeSec", 0.8);  // then fade up over 0.8s
 
   rect(-width/2, -height/2, width, height);
 }
@@ -145,6 +166,8 @@ function draw() {
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
 }
+
+
 
 
 
